@@ -1,0 +1,447 @@
+{
+  "name": "Devis/Facture Trigger",
+  "nodes": [
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "0723cc4a-7ea6-4f0c-93d3-2a5de20f6ec2",
+              "name": "quotePrefix",
+              "value": "DEV-",
+              "type": "string"
+            },
+            {
+              "id": "f36bda42-3c86-4c88-bde4-e92cf45bcab8",
+              "name": "invoicePrefix",
+              "value": "FAC-",
+              "type": "string"
+            },
+            {
+              "id": "841d8b3c-38da-48cd-880c-c383ffbec503",
+              "name": "quoteValidityDays",
+              "value": 30,
+              "type": "number"
+            },
+            {
+              "id": "5fade41b-80d9-4b34-9989-65a5e78da83f",
+              "name": "invoiceDueDays",
+              "value": 30,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        208,
+        128
+      ],
+      "id": "8b984759-887d-44b1-86ae-c6b4c2cc8551",
+      "name": "set-document"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e7db28a6-5520-481b-985c-2a46bdfd99c1",
+              "name": "issuerName",
+              "value": "Votre entreprise",
+              "type": "string"
+            },
+            {
+              "id": "77259184-59a8-4c15-91a7-d67b4f76a895",
+              "name": "issuerAddress",
+              "value": "Rue de l'adresse 1",
+              "type": "string"
+            },
+            {
+              "id": "5c6476eb-81c9-4eaa-a6c4-6c357a8d0338",
+              "name": "issuerCity",
+              "value": "1680 Ville",
+              "type": "string"
+            },
+            {
+              "id": "60316463-8668-4fc3-8546-1e2b1fdaaf4e",
+              "name": "issuerEmail",
+              "value": "Votre email",
+              "type": "string"
+            },
+            {
+              "id": "c49a1310-cff2-41d9-8d90-1b827f78d188",
+              "name": "issuerPhone",
+              "value": "votre téléphone",
+              "type": "string"
+            },
+            {
+              "id": "65f6d3fb-ba38-4cf8-a9c3-baed05b95c19",
+              "name": "issuerIBAN",
+              "value": "CH93 0076 2011 6238 5295 7",
+              "type": "string"
+            },
+            {
+              "id": "e1323326-8591-4d6d-b0f7-3606b346098b",
+              "name": "issuerVATNumber",
+              "value": "Votre n° TVA",
+              "type": "string"
+            },
+            {
+              "id": "228824df-3fea-4d7f-a2d6-45e248e23f6e",
+              "name": "paymentTerms",
+              "value": "Payable à 30 jours net",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        208,
+        -128
+      ],
+      "id": "aa7bd0e7-7469-4f6c-81b6-e521d784fad4",
+      "name": "set-émetteur"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "numberInputs": 3,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        416,
+        -32
+      ],
+      "id": "8aa7236a-6788-47a6-9697-cf02be0dd7cf",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Récupérer les données fusionnées\nconst data = $input.first().json;\n\n// 2. Construire les lignes de prestation en filtrant les lignes vides\nconst rawLines = [\n  { desc: data.line1_Desc, qty: data.line1_Qty, price: data.line1_Price },\n  { desc: data.line2_Desc, qty: data.line2_Qty, price: data.line2_Price },\n  { desc: data.line3_Desc, qty: data.line3_Qty, price: data.line3_Price },\n];\n\nconst lines = rawLines\n  .filter(line => line.desc !== \"\")\n  .map(line => ({\n    description: line.desc,\n    quantity: line.qty,\n    unitPrice: line.price,\n    lineTotal: Math.round(line.qty * line.price * 100) / 100,\n  }));\n\n// 3. Calculer les totaux\nconst totalHT = Math.round(lines.reduce((sum, l) => sum + l.lineTotal, 0) * 100) / 100;\nconst vatAmount = Math.round(totalHT * (data.vatRate / 100) * 100) / 100;\nconst totalTTC = Math.round((totalHT + vatAmount) * 100) / 100;\n\n// 4. Déterminer le préfixe et le délai selon le type de document\nconst isInvoice = data.documentType === \"Facture\";\nconst prefix = isInvoice ? data.invoicePrefix : data.quotePrefix;\nconst validityDays = isInvoice ? data.invoiceDueDays : data.quoteValidityDays;\n\n// 5. Générer le numéro de document, avec l'heure locale suisse (gère automatiquement\n//    le changement heure été/hiver, contrairement à un décalage fixe)\nconst issueDate = new Date(data.submittedAt);\n\nfunction zurichParts(date) {\n  const parts = new Intl.DateTimeFormat('en-GB', {\n    timeZone: 'Europe/Zurich',\n    year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', hour12: false,\n  }).formatToParts(date);\n  const map = {};\n  parts.forEach(p => { map[p.type] = p.value; });\n  return map;\n}\n\nconst zp = zurichParts(issueDate);\nconst datePart = `${zp.year}${zp.month}${zp.day}`;\nconst timePart = `${zp.hour}${zp.minute}`;\nconst documentNumber = `${prefix}${datePart}-${timePart}`;\n\n// 6. Calculer la date d'échéance / validité\nconst dueDate = new Date(issueDate);\ndueDate.setDate(dueDate.getDate() + validityDays);\n\n// 7. Retourner un objet propre et structuré pour le template PDF\nreturn [{\n  json: {\n    documentType: data.documentType,\n    documentNumber,\n    issueDate: `${zp.year}-${zp.month}-${zp.day}`,\n    dueDate: dueDate.toISOString().slice(0, 10),\n    issuer: {\n      name: data.issuerName,\n      address: data.issuerAddress,\n      city: data.issuerCity,\n      email: data.issuerEmail,\n      phone: data.issuerPhone,\n      iban: data.issuerIBAN,\n      vatNumber: data.issuerVATNumber,\n      paymentTerms: data.paymentTerms,\n    },\n    client: {\n      name: data.clientName,\n      address: data.clientAddress,\n      email: data.clientEmail,\n    },\n    lines,\n    vatRate: data.vatRate,\n    totalHT,\n    vatAmount,\n    totalTTC,\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        -16
+      ],
+      "id": "f00ec329-ea89-415c-b7e6-a2f3680f5b24",
+      "name": "Calculs"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\n// Sépare \"Route de la Gare 5\" en rue + numéro\nfunction parseStreet(streetFull) {\n  const match = (streetFull || '').match(/^(.*?)\\s+(\\d+\\w*)$/);\n  return match\n    ? { street: match[1].trim(), buildingNb: match[2] }\n    : { street: (streetFull || '').trim(), buildingNb: '' };\n}\n\n// Sépare \"1680 Romont\" en NPA + ville\nfunction parseCity(cityFull) {\n  const match = (cityFull || '').match(/^(\\d{4})\\s+(.*)$/);\n  return match\n    ? { postalCode: match[1], town: match[2].trim() }\n    : { postalCode: '', town: (cityFull || '').trim() };\n}\n\nconst { street, buildingNb } = parseStreet(data.issuer.address);\nconst { postalCode, town } = parseCity(data.issuer.city);\nconst ibanClean = (data.issuer.iban || '').replace(/\\s/g, '');\n\n// Construction du payload SPC (Swiss Payments Code), norme v2.3\nconst spcLines = [\n  'SPC',                            // Type\n  '0200',                           // Version\n  '1',                              // Encodage UTF-8\n  ibanClean,                        // IBAN créancier\n  'S',                              // Adresse structurée\n  data.issuer.name,\n  street,\n  buildingNb,\n  postalCode,\n  town,\n  'CH',\n  '', '', '', '', '', '', '',       // Bloc \"créancier final\" — non utilisé\n  data.totalTTC.toFixed(2),         // Montant\n  'CHF',\n  '', '', '', '', '', '', '',       // Bloc débiteur — laissé vide (simplification V1)\n  'NON',                            // Pas de référence structurée\n  '',\n  `Facture ${data.documentNumber}`, // Message libre\n  'EPD',                            // Fin des données de paiement\n  '',                                // Informations de facturation — vide\n];\n\nconst spcPayload = spcLines.join('\\r\\n');\n\nreturn [{ json: { ...data, spcPayload } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        816,
+        -16
+      ],
+      "id": "ed34809f-f877-4488-86ee-68e4ab128c37",
+      "name": "Générer SPC"
+    },
+    {
+      "parameters": {
+        "url": "https://api.qrserver.com/v1/create-qr-code/",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "data",
+              "value": "={{ $json.spcPayload }}"
+            },
+            {
+              "name": "size",
+              "value": "300x300"
+            },
+            {
+              "name": "ecc",
+              "value": "M"
+            },
+            {
+              "name": "margin",
+              "value": "0"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1008,
+        -16
+      ],
+      "id": "3e588b19-4076-4370-b7da-7eadc7a54067",
+      "name": "QR Code"
+    },
+    {
+      "parameters": {
+        "jsCode": "const PDFDocument = require('pdfkit');\n\nconst data = $('Générer SPC').first().json;\nconst qrBuffer = await this.helpers.getBinaryDataBuffer(0, 'data');\n\nconst ACCENT = '#2563eb';\nconst TEXT = '#1a1a1a';\nconst MUTED = '#6b7280';\n\nconst fmt = (n) => n.toFixed(2) + ' CHF';\n\nreturn new Promise((resolve, reject) => {\n  const doc = new PDFDocument({ size: 'A4', margin: 56 });\n  const chunks = [];\n  doc.on('data', (c) => chunks.push(c));\n  doc.on('error', reject);\n  doc.on('end', async () => {\n    try {\n      const pdfBuffer = Buffer.concat(chunks);\n      const binary = await this.helpers.prepareBinaryData(\n        pdfBuffer,\n        `${data.documentNumber}.pdf`,\n        'application/pdf'\n      );\n      resolve([{ json: data, binary: { data: binary } }]);\n    } catch (err) {\n      reject(err);\n    }\n  });\n\n  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;\n  const startX = doc.page.margins.left;\n\n  // ---- En-tête : émetteur (gauche) + titre document (droite) ----\n  doc.fontSize(15).fillColor(ACCENT).font('Helvetica-Bold').text(data.issuer.name, startX, 56);\n  doc.fontSize(9.5).fillColor(MUTED).font('Helvetica')\n    .text(data.issuer.address)\n    .text(data.issuer.city)\n    .text(`${data.issuer.email} · ${data.issuer.phone}`);\n\n  doc.fontSize(22).fillColor(ACCENT).font('Helvetica-Bold')\n    .text(data.documentType.toUpperCase(), startX, 56, { width: pageWidth, align: 'right' });\n  doc.fontSize(9.5).fillColor(MUTED).font('Helvetica')\n    .text(`N° ${data.documentNumber}`, { width: pageWidth, align: 'right' })\n    .text(`Émis le ${data.issueDate}`, { width: pageWidth, align: 'right' })\n    .text(`Échéance ${data.dueDate}`, { width: pageWidth, align: 'right' });\n\n  // ---- Bloc client ----\n  doc.moveDown(3);\n  doc.fontSize(8.5).fillColor(MUTED).font('Helvetica').text('ADRESSÉ À', startX);\n  doc.fontSize(12).fillColor(TEXT).font('Helvetica-Bold').text(data.client.name, startX);\n  doc.fontSize(9.5).fillColor(MUTED).font('Helvetica')\n    .text(data.client.address, startX)\n    .text(data.client.email, startX);\n\n  // ---- Tableau des lignes : 4 colonnes à largeurs fixes ----\n  doc.moveDown(1.5);\n  const tableTop = doc.y;\n  const gap = 10;\n  const qtyWidth = 40;\n  const priceWidth = 75;\n  const totalWidth = 90;\n  const descWidth = pageWidth - (qtyWidth + gap + priceWidth + gap + totalWidth + gap);\n\n  const col = {\n    desc: startX,\n    qty: startX + descWidth + gap,\n    price: startX + descWidth + gap + qtyWidth + gap,\n    total: startX + descWidth + gap + qtyWidth + gap + priceWidth + gap,\n  };\n\n  doc.fontSize(8.5).fillColor(MUTED).font('Helvetica-Bold');\n  doc.text('DESCRIPTION', col.desc, tableTop, { width: descWidth });\n  doc.text('QTÉ', col.qty, tableTop, { width: qtyWidth, align: 'right' });\n  doc.text('PRIX UNITAIRE', col.price, tableTop, { width: priceWidth, align: 'right' });\n  doc.text('TOTAL', col.total, tableTop, { width: totalWidth, align: 'right' });\n\n  doc.moveTo(startX, tableTop + 14).lineTo(startX + pageWidth, tableTop + 14).strokeColor(ACCENT).lineWidth(1.5).stroke();\n\n  let rowY = tableTop + 22;\n  doc.font('Helvetica').fontSize(10).fillColor(TEXT);\n  for (const line of data.lines) {\n    doc.text(line.description, col.desc, rowY, { width: descWidth });\n    doc.text(String(line.quantity), col.qty, rowY, { width: qtyWidth, align: 'right' });\n    doc.text(fmt(line.unitPrice), col.price, rowY, { width: priceWidth, align: 'right' });\n    doc.text(fmt(line.lineTotal), col.total, rowY, { width: totalWidth, align: 'right' });\n    doc.moveTo(startX, rowY + 18).lineTo(startX + pageWidth, rowY + 18).strokeColor('#e5e7eb').lineWidth(0.5).stroke();\n    rowY += 26;\n  }\n\n  // ---- Totaux ----\n  const totalsX = startX + pageWidth - 200;\n  let totalsY = rowY + 10;\n  doc.fontSize(10).fillColor(TEXT).font('Helvetica');\n  doc.text('Total HT', totalsX, totalsY, { width: 100 });\n  doc.text(fmt(data.totalHT), totalsX + 100, totalsY, { width: 100, align: 'right' });\n  totalsY += 18;\n  doc.text(`TVA (${data.vatRate}%)`, totalsX, totalsY, { width: 100 });\n  doc.text(fmt(data.vatAmount), totalsX + 100, totalsY, { width: 100, align: 'right' });\n  totalsY += 22;\n  doc.moveTo(totalsX, totalsY - 4).lineTo(totalsX + 200, totalsY - 4).strokeColor(ACCENT).lineWidth(1.5).stroke();\n  doc.fontSize(13).fillColor(ACCENT).font('Helvetica-Bold');\n  doc.text('Total TTC', totalsX, totalsY);\n  doc.text(fmt(data.totalTTC), totalsX + 100, totalsY, { width: 100, align: 'right' });\n\n  // ---- Pied de page ----\n  let footerY = totalsY + 40;\n  doc.fontSize(9).fillColor(MUTED).font('Helvetica');\n  doc.text(data.issuer.paymentTerms, startX, footerY);\n  doc.text(\n    `IBAN : ${data.issuer.iban}` + (data.issuer.vatNumber ? ` · N° TVA : ${data.issuer.vatNumber}` : ''),\n    startX\n  );\n\n  // ---- Section paiement (QR-facture) — uniquement sur les factures ----\n  if (data.documentType === 'Facture') {\n    let paymentY = doc.y + 30;\n    doc.moveTo(startX, paymentY).lineTo(startX + pageWidth, paymentY).dash(3, { space: 2 }).strokeColor(MUTED).lineWidth(1).stroke();\n    doc.undash();\n    paymentY += 20;\n\n    doc.image(qrBuffer, startX, paymentY, { width: 100, height: 100 });\n\n    const detailsX = startX + 124;\n    doc.fontSize(8).fillColor(MUTED).font('Helvetica').text('SECTION PAIEMENT', detailsX, paymentY);\n    doc.fontSize(9).fillColor(TEXT).font('Helvetica')\n      .text(`Compte / IBAN : ${data.issuer.iban}`, detailsX)\n      .text(`Créditeur : ${data.issuer.name}, ${data.issuer.address}, ${data.issuer.city}`, detailsX);\n    doc.fontSize(12).fillColor(ACCENT).font('Helvetica-Bold').text(`Montant : ${fmt(data.totalTTC)}`, detailsX);\n  }\n\n  doc.end();\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1184,
+        -16
+      ],
+      "id": "a1252bfc-3ee2-4bc4-aefe-6530cb2cc52f",
+      "name": "Générer PDF"
+    },
+    {
+      "parameters": {
+        "respondWith": "binary",
+        "responseDataSource": "set",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/pdf"
+              },
+              {
+                "name": "Content-Disposition",
+                "value": "=attachment; filename=\"{{ $json.documentNumber }}.pdf\""
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1360,
+        -16
+      ],
+      "id": "1a2a8bb6-f4c6-40d0-a201-68169f70208d",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "path": "devis-facture",
+        "authentication": "basicAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -208,
+        -176
+      ],
+      "id": "5fe414fb-0c5c-4592-8d18-1559ffe71120",
+      "name": "Form-Get",
+      "webhookId": "eea33714-e3b5-46d3-b596-8aecf2238381",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "8ZCW01hrrfv0zcNg",
+          "name": "test-webhook"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "devis-facture-submit",
+        "authentication": "basicAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -192,
+        16
+      ],
+      "id": "2bcd048e-aaa0-4e95-89ed-8e54ffa6b068",
+      "name": "Form-Post",
+      "webhookId": "d6bcd552-23f0-4bdc-891e-dba7f03b14ba",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "8ZCW01hrrfv0zcNg",
+          "name": "test-webhook"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\n\nreturn [{\n  json: {\n    documentType: body.documentType,\n    clientName: body.clientName,\n    clientAddress: body.clientAddress,\n    clientEmail: body.clientEmail,\n    line1_Desc: body.line1_Desc,\n    line1_Qty: Number(body.line1_Qty),\n    line1_Price: Number(body.line1_Price),\n    line2_Desc: body.line2_Desc || '',\n    line2_Qty: Number(body.line2_Qty) || 0,\n    line2_Price: Number(body.line2_Price) || 0,\n    line3_Desc: body.line3_Desc || '',\n    line3_Qty: Number(body.line3_Qty) || 0,\n    line3_Price: Number(body.line3_Price) || 0,\n    vatRate: Number(body.vatRate),\n    submittedAt: new Date().toISOString(),\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -16,
+        16
+      ],
+      "id": "25782087-72fc-4c07-811d-bd084cc81465",
+      "name": "Mise en forme Data"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "<!DOCTYPE html>\n<html lang=\"fr\">\n<head>\n<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>DigiGlâne Systems — Devis / Facture</title>\n<style>\n  :root { --accent: #2563eb; --text: #1a1a1a; --muted: #6b7280; --border: #e5e7eb; }\n  * { box-sizing: border-box; }\n  body {\n    font-family: 'Helvetica Neue', Arial, sans-serif;\n    background: #f9fafb;\n    color: var(--text);\n    max-width: 640px;\n    margin: 40px auto;\n    padding: 0 20px;\n  }\n  h1 { color: var(--accent); font-size: 20pt; margin-bottom: 4px; }\n  p.subtitle { color: var(--muted); margin-top: 0; margin-bottom: 32px; }\n  fieldset {\n    border: 1px solid var(--border);\n    border-radius: 8px;\n    padding: 16px 20px 20px;\n    margin-bottom: 20px;\n  }\n  legend { font-weight: 700; color: var(--accent); padding: 0 6px; font-size: 10pt; text-transform: uppercase; letter-spacing: 0.5px; }\n  label { display: block; font-size: 9pt; color: var(--muted); margin-top: 12px; margin-bottom: 4px; }\n  input, select {\n    width: 100%;\n    padding: 8px 10px;\n    border: 1px solid var(--border);\n    border-radius: 6px;\n    font-size: 10.5pt;\n  }\n  .line-row { display: flex; gap: 10px; }\n  .line-row .desc { flex: 3; }\n  .line-row .qty { flex: 1; }\n  .line-row .price { flex: 1; }\n  button {\n    width: 100%;\n    background: var(--accent);\n    color: white;\n    border: none;\n    padding: 14px;\n    border-radius: 8px;\n    font-size: 11pt;\n    font-weight: 700;\n    cursor: pointer;\n    margin-top: 10px;\n  }\n  button:hover { opacity: 0.9; }\n</style>\n</head>\n<body>\n  <h1>Générateur de devis / facture</h1>\n  <p class=\"subtitle\">Votre entreprise</p>\n\n  <form method=\"POST\" action=\"https://n8n.digiglane.ch/webhook/devis-facture-submit\" target=\"_top\">\n\n    <fieldset>\n      <legend>Document</legend>\n      <label for=\"documentType\">Type de document</label>\n      <select id=\"documentType\" name=\"documentType\" required>\n        <option value=\"Devis\">Devis</option>\n        <option value=\"Facture\">Facture</option>\n      </select>\n    </fieldset>\n\n    <fieldset>\n      <legend>Client</legend>\n      <label for=\"clientName\">Nom du client</label>\n      <input type=\"text\" id=\"clientName\" name=\"clientName\" required>\n      <label for=\"clientAddress\">Adresse du client</label>\n      <input type=\"text\" id=\"clientAddress\" name=\"clientAddress\" required>\n      <label for=\"clientEmail\">Email du client</label>\n      <input type=\"email\" id=\"clientEmail\" name=\"clientEmail\" required>\n    </fieldset>\n\n    <fieldset>\n      <legend>Prestations</legend>\n\n      <div class=\"line-row\">\n        <div class=\"desc\"><label>Description (ligne 1)</label><input type=\"text\" name=\"line1_Desc\" required></div>\n        <div class=\"qty\"><label>Qté</label><input type=\"number\" name=\"line1_Qty\" step=\"1\" required></div>\n        <div class=\"price\"><label>Prix unitaire</label><input type=\"number\" name=\"line1_Price\" step=\"0.01\" required></div>\n      </div>\n\n      <div class=\"line-row\">\n        <div class=\"desc\"><label>Description (ligne 2)</label><input type=\"text\" name=\"line2_Desc\"></div>\n        <div class=\"qty\"><label>Qté</label><input type=\"number\" name=\"line2_Qty\" step=\"1\" value=\"\"></div>\n        <div class=\"price\"><label>Prix unitaire</label><input type=\"number\" name=\"line2_Price\" step=\"0.01\" value=\"\"></div>\n      </div>\n\n      <div class=\"line-row\">\n        <div class=\"desc\"><label>Description (ligne 3)</label><input type=\"text\" name=\"line3_Desc\"></div>\n        <div class=\"qty\"><label>Qté</label><input type=\"number\" name=\"line3_Qty\" step=\"1\" value=\"\"></div>\n        <div class=\"price\"><label>Prix unitaire</label><input type=\"number\" name=\"line3_Price\" step=\"0.01\" value=\"\"></div>\n      </div>\n\n      <label for=\"vatRate\">Taux TVA (%)</label>\n      <input type=\"number\" id=\"vatRate\" name=\"vatRate\" step=\"0.1\" value=\"8.1\" required>\n    </fieldset>\n\n    <button type=\"submit\">Générer le document</button>\n  </form>\n</body>\n</html>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -16,
+        -176
+      ],
+      "id": "9856474a-8c78-434f-9c92-fa276b16cc30",
+      "name": "Form Html"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "set-émetteur": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "set-document": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Calculs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculs": {
+      "main": [
+        [
+          {
+            "node": "Générer SPC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Générer SPC": {
+      "main": [
+        [
+          {
+            "node": "QR Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "QR Code": {
+      "main": [
+        [
+          {
+            "node": "Générer PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Générer PDF": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Form-Get": {
+      "main": [
+        [
+          {
+            "node": "Form Html",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Form-Post": {
+      "main": [
+        [
+          {
+            "node": "Mise en forme Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mise en forme Data": {
+      "main": [
+        [
+          {
+            "node": "set-émetteur",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "set-document",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "37d465bd-5d4f-4578-a247-98bd2280f6b9",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "eb8ce9c0200f5f8c5fa6458e7381ccdbe1d2f575084897a7b3803d7028ba3bf5"
+  },
+  "nodeGroups": [],
+  "id": "jqGxQPKT3VyhUWpZ",
+  "tags": []
+}
